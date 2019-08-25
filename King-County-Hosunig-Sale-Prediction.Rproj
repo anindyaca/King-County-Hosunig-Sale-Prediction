@@ -11,3 +11,121 @@ Encoding: UTF-8
 
 RnwWeave: Sweave
 LaTeX: pdfLaTeX
+
+
+# House Sales in King County, USA
+
+setwd("~/Documents/Infinite 2/Kaggle Projects/Kings Housing Pricing Prediction_Linear_Regression")
+
+#install.packages("pacman")
+library(readr)
+library(caret)
+library(MASS)
+library(pacman)
+
+# Importing Data
+kc_house_data <- read_csv("kc_house_data.csv")
+str(kc_house_data) # 21 variables
+# price is the column to be predicted
+# distribution of price in dataset
+hist(kc_house_data$price) # plots shows skeded dataset
+# Skewed Dataset -- mean > median (right skewed data) , mean < median (left skewed data)
+kc_house_data$price = log(kc_house_data$price) # price distribution is non skewed now
+pacman::p_load(Metrics, car, corrplot, caTools, ggplot2, DAAG)
+
+# Checking for NA values
+sum(is.na(kc_house_data)) # 0 NA values
+sapply(kc_house_data, function (x) sum(is.na(x))) # no columns with NA values
+# removing id column as it is not needed for model building
+kc_house_data = kc_house_data[,-1]
+
+# Correlation
+corr = cor(kc_house_data[,2:20]) # correlation matrix is only formed for numeric variables, hence I have taked columns from 2:20, excluding date at first
+# other wise, you can convert date to numeric format and then find the correlation matrix
+corrplot(corr,method = "color" , number.digits = 3 , number.cex = 0.60,addCoef.col = "Black" , addgrid.col = "red")
+# Lets pick the variables with high correlation value, these will be used in analysis
+# sqft_living with 0.69 correlation value
+# grade having correlation = 0.70
+# sqft_living , sqft_above, bathrooms
+
+# Removing columns with less correlation value
+kc_house_data$date = NULL
+kc_house_data$sqft_lot = NULL
+kc_house_data$sqft_lot15 = NULL
+kc_house_data$yr_built = NULL
+kc_house_data$lat = NULL
+kc_house_data$long = NULL
+
+# Multicollienarity testing
+# Multicollienarity exists when variables are not just correlated to response variable, but also correlated to each other\
+# Using VIF to check multicollienarity
+model = lm(formula = price~sqft_living + sqft_above , data = kc_house_data)
+vif(model) # vif value is 4, we can remove this variables from our analysis, correlation of sqft_living is better, so we can remove sqft_above
+
+kc_house_data$sqft_above = NULL
+
+model = lm(formula = price~sqft_living + bathrooms, data = kc_house_data)
+vif(model) # vif is less, we can keep both the variables
+
+model = lm(formula = price~sqft_living + sqft_living15 , data = kc_house_data)
+vif(model) # vif is less, we can keep both the variables
+
+model = lm(formula = price~sqft_living + grade , data = kc_house_data)
+vif(model) # vif is less, we can keep both the variables
+
+
+# kc_house_data = kc_house_data[kc_house_data$bedrooms <10 , ]
+# Most of the houses do not have basement , lets check
+length(kc_house_data$sqft_basement[kc_house_data$sqft_basement == 0]) # 13125 houeses do not have basement
+# making these to 0 and 1
+kc_house_data$sqft_basement[kc_house_data$sqft_basement != 0] = 1
+# create factor of the variable
+kc_house_data$sqft_basement = as.factor(kc_house_data$sqft_basement)
+kc_house_data$zipcode=as.factor(kc_house_data$zipcode)
+
+# Feature Scaling
+numericFeatures = sapply(kc_house_data[,-1], is.numeric)
+numericFeatures=c(FALSE, numericFeatures)
+kc_house_data[numericFeatures] = sapply(kc_house_data[numericFeatures], scale)
+
+# Splitting the data into training and testing datasets
+set.seed(100)
+sample = sample.split(kc_house_data, SplitRatio = 0.7)
+training = subset(kc_house_data, sample ==T)
+test - subset(kc_house_data , sample ==F)
+
+# Predictive Modelling
+model_1 = lm(formula = price~. , data = kc_house_data)
+summary(model_1) # bedrooms are not statisticaaly significant, hence we are removing the same
+model_2 = lm(formula = price~bathrooms + floors + waterfront + view + condition +
+               + sqft_basement + yr_renovated + zipcode + sqft_living15 + sqft_living + grade,
+             data = kc_house_data)
+summary(model_2)
+
+
+hist(model_2$residuals)  # residuals are uniformly distributed
+mean(model_2$residuals)  # 6.686699e-18
+
+# Predicting on Training Dataset
+prediction_train = predict(model_2 , newdata = training)
+
+# Visulisation the training sets
+ggplot() +
+  geom_point(aes(x = training$sqft_living, y = training$price),
+             colour = 'red') +
+  geom_line(aes(x = training$sqft_living, y = prediction_train),
+            colour = 'blue') +
+  ggtitle('Sqft_living vs Price (Testing set)') +
+  xlab('Sqft_living') +
+  ylab('Price')
+
+# Predicting the same on testing Dataset
+prediction_test = predict(model_2 , newdata = testing)
+model_output = cbind(testing , prediction_test)
+rmse(model_output$price , model_output$prediction_test) # RMSE = 0.1835
+
+# K fold cross validation testing
+cvResult = CVlm(data = kc_house_data , form.lm = price ~ bathrooms + floors + waterfront + view + condition +
+                  + sqft_basement + yr_renovated + zipcode + sqft_living15 +
+                  sqft_living + grade , m = 4 , seed = 29 , legend.pos = "topleft" ,  printit = FALSE , main = "Plot CV Results -- Anindya Chakraborty")
+
